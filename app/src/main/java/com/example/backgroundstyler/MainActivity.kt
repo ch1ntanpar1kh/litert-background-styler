@@ -188,10 +188,11 @@ private fun StatsPanel(state: UiState, modifier: Modifier = Modifier) {
   ) {
     Text("One App, Two Paths", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
     val mono = FontFamily.Monospace
-    StatLine("#1 ML Kit Selfie Segmentation", "${state.mlKitMs} ms", Color(0xFFFFEB3B), mono)
+    StatLine("#1 ML Kit Selfie Segmentation (CPU)", "%.1f ms".format(state.mlKitMs), Color(0xFFFFEB3B), mono)
     val accel = state.activeAccelerator?.name ?: "…"
-    StatLine("#2 LiteRT CompiledModel ($accel)", "${state.liteRtMs} ms", Color(0xFFFFEB3B), mono)
-    StatLine("Compose", "${state.composeMs} ms", Color.White, mono)
+    StatLine("#2 LiteRT inference ($accel)", "%.1f ms".format(state.liteRtInferenceMs), Color(0xFFFFEB3B), mono)
+    StatLine("    LiteRT pre/post (CPU)", "%.1f ms".format(state.liteRtPrePostMs), Color.White, mono)
+    StatLine("Compose (CPU)", "%.1f ms".format(state.composeMs), Color.White, mono)
     StatLine("FPS", "%.1f".format(state.fps), Color.White, mono)
     Text("Standalone LiteRT (bundled)", color = Color(0xFF8AB4F8), fontSize = 11.sp)
     // Live proof that both ML paths are active.

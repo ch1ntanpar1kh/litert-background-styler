@@ -101,6 +101,12 @@ class LiteRtStylizer(private val context: Context) : AutoCloseable {
     }
   }
 
+  /** Per-stage timings of the last [stylize] call, in milliseconds. */
+  data class Timings(val preMs: Float = 0f, val inferenceMs: Float = 0f, val postMs: Float = 0f)
+
+  var lastTimings = Timings()
+    private set
+
   /**
    * Stylizes [frame] and returns a [CONTENT_SIZE]x[CONTENT_SIZE] bitmap. The caller scales it to
    * the frame size when compositing.
@@ -109,26 +115,36 @@ class LiteRtStylizer(private val context: Context) : AutoCloseable {
     check(isReady) { "initialize() and setStyle() first" }
     val model = transferModel!!
 
-    // Pre-process: resize to 384x384, RGB float in [0, 1], NHWC.
+    // Pre-process (CPU): resize to 384x384, RGB float in [0, 1], NHWC, write input tensors.
+    val t0 = System.nanoTime()
     val scaled = Bitmap.createScaledBitmap(frame, CONTENT_SIZE, CONTENT_SIZE, true)
     scaled.getPixels(contentPixels, 0, CONTENT_SIZE, 0, 0, CONTENT_SIZE, CONTENT_SIZE)
     pixelsToRgbFloats(contentPixels, contentFloats)
-
-    // Inference (synchronous).
     transferInputs[CONTENT_INPUT].writeFloat(contentFloats)
     transferInputs[BOTTLENECK_INPUT].writeFloat(styleBottleneck!!)
-    model.run(transferInputs, transferOutputs)
-    val out = transferOutputs[0].readFloat()
 
-    // Post-process: [0, 1] RGB floats -> ARGB pixels.
+    // Inference on the active accelerator (synchronous).
+    val t1 = System.nanoTime()
+    model.run(transferInputs, transferOutputs)
+
+    // Post-process (CPU): read output tensor, [0, 1] RGB floats -> ARGB pixels.
+    val t2 = System.nanoTime()
+    val out = transferOutputs[0].readFloat()
     for (i in outputPixels.indices) {
       val r = (out[i * 3] * 255f).toInt().coerceIn(0, 255)
       val g = (out[i * 3 + 1] * 255f).toInt().coerceIn(0, 255)
       val b = (out[i * 3 + 2] * 255f).toInt().coerceIn(0, 255)
       outputPixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
     }
-    return Bitmap.createBitmap(outputPixels, CONTENT_SIZE, CONTENT_SIZE, Bitmap.Config.ARGB_8888)
+    val result =
+      Bitmap.createBitmap(outputPixels, CONTENT_SIZE, CONTENT_SIZE, Bitmap.Config.ARGB_8888)
+    val t3 = System.nanoTime()
+
+    lastTimings = Timings(preMs = ms(t0, t1), inferenceMs = ms(t1, t2), postMs = ms(t2, t3))
+    return result
   }
+
+  private fun ms(startNs: Long, endNs: Long): Float = (endNs - startNs) / 1_000_000f
 
   private fun pixelsToRgbFloats(pixels: IntArray, out: FloatArray) {
     for (i in pixels.indices) {

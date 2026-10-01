@@ -13,6 +13,7 @@ import com.example.backgroundstyler.litert.LiteRtStylizer
 import com.example.backgroundstyler.mlkit.SelfieSegmenterHelper
 import com.google.ai.edge.litert.Accelerator
 import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.segmentation.SegmentationMask
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -40,9 +41,13 @@ data class UiState(
   val requestedAccelerator: Accelerator = Accelerator.GPU,
   val activeAccelerator: Accelerator? = null,
   val modelsLoading: Boolean = true,
-  val mlKitMs: Long = 0,
-  val liteRtMs: Long = 0,
-  val composeMs: Long = 0,
+  /** ML Kit Selfie Segmentation end-to-end latency (runs on CPU). */
+  val mlKitMs: Float = 0f,
+  /** LiteRT CompiledModel.run() only -- inference on the active accelerator. */
+  val liteRtInferenceMs: Float = 0f,
+  /** LiteRT CPU pre-processing (resize, normalize, write tensors) + post-processing. */
+  val liteRtPrePostMs: Float = 0f,
+  val composeMs: Float = 0f,
   val fps: Float = 0f,
   /** True once ML Kit Selfie Segmentation has returned at least one mask. */
   val mlKitVerified: Boolean = false,
@@ -68,6 +73,13 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
    */
   val mlExecutor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "ml") }
   private val mlDispatcher = mlExecutor.asCoroutineDispatcher()
+
+  /**
+   * Waits on ML Kit results and timestamps them. Timing ML Kit here (instead of via a completion
+   * listener on the ML thread) avoids a race where Tasks.await() returned before the listener ran
+   * and ML Kit was reported with LiteRT's latency.
+   */
+  private val mlKitTimer: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "mlkit-timer") }
 
   private val segmenter = SelfieSegmenterHelper()
   private val stylizer = LiteRtStylizer(app)
@@ -141,48 +153,48 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
       }
 
     val currentMode = mode
-    var mlKitMs = 0L
-    var liteRtMs = 0L
-    var composeMs = 0L
+    var mlKitMs = 0f
+    var liteRtInferenceMs = 0f
+    var liteRtPrePostMs = 0f
+    var composeMs = 0f
     val output: Bitmap =
       try {
         when (currentMode) {
           ViewMode.ORIGINAL -> frame
           ViewMode.MASK -> {
-            val t0 = SystemClock.uptimeMillis()
-            val mask = Tasks.await(segmenter.process(frame))
-            mlKitMs = SystemClock.uptimeMillis() - t0
+            val (mask, ms) = segmentTimed(frame)
+            mlKitMs = ms
             onMaskReceived(mask.width, mask.height)
             composer.maskOverlay(frame, mask)
           }
           ViewMode.STYLIZED -> {
             if (!stylizer.isReady) frame
             else {
-              val t0 = SystemClock.uptimeMillis()
               val styled = stylizer.stylize(frame)
-              liteRtMs = SystemClock.uptimeMillis() - t0
+              stylizer.lastTimings.let {
+                liteRtInferenceMs = it.inferenceMs
+                liteRtPrePostMs = it.preMs + it.postMs
+              }
               Bitmap.createScaledBitmap(styled, frame.width, frame.height, true)
             }
           }
           ViewMode.COMPOSED -> {
             if (!stylizer.isReady) frame
             else {
-              // Both paths run concurrently: ML Kit on its own executor, LiteRT on this thread.
-              val t0 = SystemClock.uptimeMillis()
-              var maskDoneAt = 0L
-              val maskTask =
-                segmenter.process(frame).addOnCompleteListener(Runnable::run) {
-                  maskDoneAt = SystemClock.uptimeMillis()
-                }
+              // Both paths run concurrently: ML Kit (CPU) is timed on its own thread while
+              // LiteRT (GPU) runs on this one.
+              val maskFuture = mlKitTimer.submit<Pair<SegmentationMask, Float>> { segmentTimed(frame) }
               val styled = stylizer.stylize(frame)
-              liteRtMs = SystemClock.uptimeMillis() - t0
-              val mask = Tasks.await(maskTask)
-              // ML Kit's own latency (it ran in parallel with LiteRT).
-              mlKitMs = (if (maskDoneAt > 0) maskDoneAt else SystemClock.uptimeMillis()) - t0
+              stylizer.lastTimings.let {
+                liteRtInferenceMs = it.inferenceMs
+                liteRtPrePostMs = it.preMs + it.postMs
+              }
+              val (mask, ms) = maskFuture.get()
+              mlKitMs = ms
               onMaskReceived(mask.width, mask.height)
-              val t1 = SystemClock.uptimeMillis()
+              val t1 = System.nanoTime()
               val composed = composer.compose(frame, styled, mask)
-              composeMs = SystemClock.uptimeMillis() - t1
+              composeMs = (System.nanoTime() - t1) / 1_000_000f
               composed
             }
           }
@@ -195,8 +207,8 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
     if (++frameCount % 60 == 0L && currentMode == ViewMode.COMPOSED) {
       Log.i(
         CHECK,
-        "frame=$frameCount mlkit=${mlKitMs}ms litert(${stylizer.activeAccelerator})=${liteRtMs}ms " +
-          "compose=${composeMs}ms",
+        "frame=$frameCount mlkit(CPU)=%.1fms litert-inference(%s)=%.1fms litert-pre/post(CPU)=%.1fms compose=%.1fms"
+          .format(mlKitMs, stylizer.activeAccelerator, liteRtInferenceMs, liteRtPrePostMs, composeMs),
       )
     }
 
@@ -207,11 +219,19 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
       it.copy(
         frame = output,
         mlKitMs = mlKitMs,
-        liteRtMs = liteRtMs,
+        liteRtInferenceMs = liteRtInferenceMs,
+        liteRtPrePostMs = liteRtPrePostMs,
         composeMs = composeMs,
         fps = if (it.fps == 0f) instFps else it.fps * 0.9f + instFps * 0.1f,
       )
     }
+  }
+
+  /** Runs ML Kit segmentation and returns the mask with its end-to-end latency in ms. */
+  private fun segmentTimed(frame: Bitmap): Pair<SegmentationMask, Float> {
+    val start = System.nanoTime()
+    val mask = Tasks.await(segmenter.process(frame))
+    return mask to (System.nanoTime() - start) / 1_000_000f
   }
 
   private fun onMaskReceived(width: Int, height: Int) {
@@ -239,6 +259,7 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
       segmenter.close()
     }
     mlExecutor.shutdown()
+    mlKitTimer.shutdown()
   }
 
   private companion object {
