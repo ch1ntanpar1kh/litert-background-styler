@@ -100,6 +100,8 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
   private var mlKitLogged = false
 
   init {
+    Log.i(CHECK, "Background Styler ${com.example.backgroundstyler.BuildConfig.VERSION_NAME} " +
+      "(versionCode ${com.example.backgroundstyler.BuildConfig.VERSION_CODE}) started")
     viewModelScope.launch { loadModels(Accelerator.GPU) }
   }
 

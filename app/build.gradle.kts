@@ -12,8 +12,8 @@ android {
     applicationId = "com.example.backgroundstyler"
     minSdk = 26
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 3
+    versionName = "1.2"
 
     ndk { abiFilters += "arm64-v8a" }
   }
@@ -30,7 +30,10 @@ android {
     targetCompatibility = JavaVersion.VERSION_17
   }
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
 
   // .tflite files must stay uncompressed so LiteRT can mmap them from assets.
   androidResources { noCompress += "tflite" }
