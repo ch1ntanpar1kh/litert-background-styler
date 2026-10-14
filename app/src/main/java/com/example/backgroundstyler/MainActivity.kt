@@ -186,32 +186,14 @@ private fun StatsPanel(state: UiState, modifier: Modifier = Modifier) {
       .background(Color.Black.copy(alpha = 0.6f))
       .padding(horizontal = 12.dp, vertical = 8.dp)
   ) {
-    Text("One App, Two Paths", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    // Pre/post-processing and compose timings are still measured and logged under the
+    // `PipelineCheck` logcat tag; the on-screen overlay shows only the headline numbers.
     val mono = FontFamily.Monospace
     StatLine("#1 ML Kit Selfie Segmentation (CPU)", "%.1f ms".format(state.mlKitMs), Color(0xFFFFEB3B), mono)
     val accel = state.activeAccelerator?.name ?: "…"
     StatLine("#2 LiteRT inference ($accel)", "%.1f ms".format(state.liteRtInferenceMs), Color(0xFFFFEB3B), mono)
-    StatLine("    LiteRT pre/post (CPU)", "%.1f ms".format(state.liteRtPrePostMs), Color.White, mono)
-    StatLine("Compose (CPU)", "%.1f ms".format(state.composeMs), Color.White, mono)
     StatLine("FPS", "%.1f".format(state.fps), Color.White, mono)
-    Text("Standalone LiteRT (bundled)", color = Color(0xFF8AB4F8), fontSize = 11.sp)
-    // Live proof that both ML paths are active.
-    Text(
-      if (state.mlKitVerified) "✓ ML Kit Selfie Segmentation active" else "… waiting for ML Kit mask",
-      color = if (state.mlKitVerified) Color(0xFF81C995) else Color.LightGray,
-      fontSize = 11.sp,
-    )
-    when {
-      state.activeAccelerator == null -> Text("… compiling LiteRT style model", color = Color.LightGray, fontSize = 11.sp)
-      state.gpuFallback ->
-        Text("⚠ GPU unavailable — LiteRT fell back to CPU", color = Color(0xFFF28B82), fontSize = 11.sp)
-      else ->
-        Text(
-          "✓ LiteRT CompiledModel style model on ${state.activeAccelerator}",
-          color = Color(0xFF81C995),
-          fontSize = 11.sp,
-        )
-    }
+    // Only shown if model loading fails.
     state.error?.let { Text(it, color = Color(0xFFF28B82), fontSize = 11.sp) }
   }
 }
