@@ -1,14 +1,15 @@
 [versions]
 agp = "8.9.1"
-kotlin = "2.2.21"
+kotlin = "2.4.0"
 coreKtx = "1.17.0"
 lifecycle = "2.10.0"
 activityCompose = "1.12.1"
 composeBom = "2025.12.00"
 camera = "1.5.2"
 coroutines = "1.10.2"
-# LiteRT (CompiledModel API), bundled in the APK.
-litert = "2.2.0"
+# LiteRT in Google Play services (CompiledModel API). Pulls in litert-api 2.3.0; the runtime
+# itself comes from Google Play services, so no LiteRT native libraries ship in the APK.
+playServicesLitert = "17.0.0-eap01"
 mlkitSelfieSegmentation = "16.0.0-beta6"
 
 [libraries]
@@ -27,7 +28,7 @@ androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", 
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camera" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
-litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
+play-services-litert = { group = "com.google.android.gms", name = "play-services-litert", version.ref = "playServicesLitert" }
 mlkit-segmentation-selfie = { group = "com.google.mlkit", name = "segmentation-selfie", version.ref = "mlkitSelfieSegmentation" }
 
 [plugins]

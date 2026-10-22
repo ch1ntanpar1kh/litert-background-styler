@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.google.ai.edge.litert.Accelerator
 import com.google.ai.edge.litert.CompiledModel
+import com.google.ai.edge.litert.Environment
 import com.google.ai.edge.litert.TensorBuffer
 
 /**
@@ -45,35 +46,41 @@ class LiteRtStylizer(private val context: Context) : AutoCloseable {
    *
    * Call off the main thread: accelerator probing and GPU shader compilation take time.
    */
-  fun initialize(preferred: Accelerator) {
+  /**
+   * @param environment LiteRT environment backed by the Google Play services runtime (from
+   *   `LiteRt.initialize(context, options)`).
+   */
+  fun initialize(preferred: Accelerator, environment: Environment) {
     closeModels()
     activeAccelerator =
       try {
-        loadModels(preferred)
+        loadModels(preferred, environment)
         preferred
       } catch (e: Exception) {
         if (preferred == Accelerator.CPU) throw e
         Log.w(TAG, "Failed to compile for $preferred, falling back to CPU", e)
         closeModels()
-        loadModels(Accelerator.CPU)
+        loadModels(Accelerator.CPU, environment)
         Accelerator.CPU
       }
     Log.i(TAG, "Stylizer ready on $activeAccelerator")
   }
 
-  private fun loadModels(accelerator: Accelerator) {
+  private fun loadModels(accelerator: Accelerator, environment: Environment) {
     predictModel =
       CompiledModel.create(
         context.assets,
         PREDICT_MODEL,
         // This line is the entire GPU setup.
         CompiledModel.Options(accelerator),
+        environment,
       )
     val transfer =
       CompiledModel.create(
         context.assets,
         TRANSFER_MODEL,
         CompiledModel.Options(accelerator),
+        environment,
       )
     transferModel = transfer
     transferInputs = transfer.createInputBuffers()

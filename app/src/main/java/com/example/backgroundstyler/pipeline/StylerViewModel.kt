@@ -12,6 +12,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.backgroundstyler.litert.LiteRtStylizer
 import com.example.backgroundstyler.mlkit.SelfieSegmenterHelper
 import com.google.ai.edge.litert.Accelerator
+import com.google.ai.edge.litert.Environment
+import com.google.android.gms.litert.LiteRt
+import com.google.android.gms.litert.LiteRtDsl.initializationOptions
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.segmentation.SegmentationMask
 import java.util.concurrent.ExecutorService
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 /** What the viewfinder shows. [COMPOSED] is the full two-path pipeline. */
@@ -85,6 +89,9 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
   private val stylizer = LiteRtStylizer(app)
   private val composer = FrameComposer()
 
+  /** LiteRT environment from Google Play services; created once, reused across recompiles. */
+  private var environment: Environment? = null
+
   val styles: List<StyleOption> =
     app.assets.list(STYLE_DIR).orEmpty().sorted().map { file ->
       val bmp = app.assets.open("$STYLE_DIR/$file").use { BitmapFactory.decodeStream(it) }
@@ -102,7 +109,27 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
   init {
     Log.i(CHECK, "Background Styler ${com.example.backgroundstyler.BuildConfig.VERSION_NAME} " +
       "(versionCode ${com.example.backgroundstyler.BuildConfig.VERSION_CODE}) started")
-    viewModelScope.launch { loadModels(Accelerator.GPU) }
+    viewModelScope.launch {
+      try {
+        // LiteRT runtime comes from Google Play services (no LiteRT native libs in the APK).
+        environment =
+          LiteRt.initialize(
+              app,
+              initializationOptions {
+                setEnableGpu(true)
+                setEnableAutomaticDownload(true)
+              },
+            )
+            .await()
+        Log.i(CHECK, "LiteRT in Google Play services initialized (GPU support requested)")
+        loadModels(Accelerator.GPU)
+      } catch (e: Exception) {
+        Log.e(CHECK, "LiteRT in Google Play services init failed", e)
+        _state.update {
+          it.copy(modelsLoading = false, error = "Play services LiteRT init failed: ${e.message}")
+        }
+      }
+    }
   }
 
   fun setMode(newMode: ViewMode) {
@@ -129,7 +156,7 @@ class StylerViewModel(private val app: Application) : AndroidViewModel(app) {
     try {
       val active =
         withContext(mlDispatcher) {
-          stylizer.initialize(accelerator)
+          stylizer.initialize(accelerator, checkNotNull(environment) { "LiteRT not initialized" })
           stylizer.setStyle(styles[_state.value.selectedStyle].thumbnail)
           stylizer.activeAccelerator
         }

@@ -36,11 +36,23 @@ thread, so the two paths overlap in time.
   latency on stage. If the GPU is unavailable, the app falls back to CPU.
 * **Camera flip** switches between front and back cameras.
 
-## LiteRT runtime
+## LiteRT runtime (branch `gms-core`)
 
-Standalone app: the LiteRT runtime (`com.google.ai.edge.litert:litert:2.2.0`) is
-bundled in the APK. `CompiledModel.create(assets, model, CompiledModel.Options(Accelerator.GPU))`
-is all it takes -- no Play services dependency.
+This branch runs the LiteRT CompiledModel API on the **LiteRT runtime in Google Play services**
+(`com.google.android.gms:play-services-litert:17.0.0-eap01`, which pulls in `litert-api:2.3.0`).
+No LiteRT runtime or GPU accelerator native libraries ship in the APK.
+
+```kotlin
+val env = LiteRt.initialize(context, initializationOptions {
+  setEnableGpu(true)
+  setEnableAutomaticDownload(true)
+}).await()
+CompiledModel.create(assets, "style_transfer_fp16.tflite", CompiledModel.Options(Accelerator.GPU), env)
+```
+
+The EAP SDK is not checked in. Unzip it to `~/gms-litert-eap-maven` (or pass
+`-PgmsLitertEapRepo=<dir>`). The EAP AAR is compiled with Kotlin 2.4, so this branch uses
+Kotlin 2.4.0. Branch `main` keeps the standalone (bundled `litert:2.2.0`) version.
 
 ## Build and run
 

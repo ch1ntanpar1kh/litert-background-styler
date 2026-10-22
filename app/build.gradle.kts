@@ -12,8 +12,8 @@ android {
     applicationId = "com.example.backgroundstyler"
     minSdk = 26
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.2"
+    versionCode = 4
+    versionName = "1.3-gms"
 
     ndk { abiFilters += "arm64-v8a" }
   }
@@ -65,6 +65,6 @@ dependencies {
   // ML use #1: ML Kit Selfie Segmentation -> foreground mask.
   implementation(libs.mlkit.segmentation.selfie)
 
-  // ML use #2: LiteRT CompiledModel on GPU -> stylized background.
-  implementation(libs.litert)
+  // ML use #2: LiteRT CompiledModel on GPU -> stylized background, runtime from Play services.
+  implementation(libs.play.services.litert)
 }
